@@ -3,11 +3,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.auth import router as auth_router
+from app.api.popups import router as popups_router
 from app.api.websites import router as websites_router
 from app.database import get_db
 
 app = FastAPI(title="AI Popup Generator API", version="0.1.0")
 app.include_router(auth_router)
+app.include_router(popups_router)
 app.include_router(websites_router)
 
 
