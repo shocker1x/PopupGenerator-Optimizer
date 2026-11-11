@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60
     gemini_api_key: SecretStr | None = None
     gemini_model: str | None = None
+    media_dir: Path = PROJECT_ROOT / "media"
+    public_api_base_url: str = "http://localhost:8000"
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

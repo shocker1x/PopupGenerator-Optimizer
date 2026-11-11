@@ -7,15 +7,19 @@ import {
   ChevronDown,
   CircleHelp,
   Clock3,
+  Copy,
   ExternalLink,
   Globe2,
+  ImagePlus,
   LayoutDashboard,
   LogOut,
   Mail,
   MousePointer2,
   Plus,
+  Save,
   ScanSearch,
   Sparkles,
+  Upload,
   WandSparkles,
 } from 'lucide-react';
 import PopupPreview from './components/PopupPreview.jsx';
@@ -23,9 +27,14 @@ import {
   analyzeWebsite,
   authenticate,
   clearToken,
+  createCampaign,
   generatePopups,
   getToken,
+  publishCampaign,
+  regeneratePopupVersion,
   setToken,
+  updatePopupVersion,
+  uploadPopupImage,
 } from './services/api.js';
 
 const toneNames = {
@@ -222,15 +231,197 @@ function PreviewBrowser({ config, hostname }) {
   );
 }
 
-function Studio({ result, generated, hostname, onBack, onNewSite }) {
+function PopupEditor({ config, onChange, onUploadImage, uploading }) {
+  function updateTheme(field, value) {
+    onChange({ ...config, theme: { ...config.theme, [field]: value } });
+  }
+
+  function updateTrigger(field, value) {
+    onChange({
+      ...config,
+      trigger: {
+        ...config.trigger,
+        [field]: field === 'type' ? value : Number(value),
+      },
+    });
+  }
+
+  return (
+    <div className="editor-grid">
+      <label className="editor-field editor-field--wide">
+        <span>Headline</span>
+        <input maxLength={90} value={config.headline} onChange={(event) => onChange({ ...config, headline: event.target.value })} />
+        <small>{config.headline.length}/90</small>
+      </label>
+      <label className="editor-field editor-field--wide">
+        <span>Description</span>
+        <textarea maxLength={240} rows={3} value={config.description} onChange={(event) => onChange({ ...config, description: event.target.value })} />
+        <small>{config.description.length}/240</small>
+      </label>
+      <label className="editor-field">
+        <span>Button text</span>
+        <input maxLength={40} value={config.cta} onChange={(event) => onChange({ ...config, cta: event.target.value })} />
+      </label>
+      <label className="editor-field">
+        <span>Trigger</span>
+        <select value={config.trigger.type} onChange={(event) => updateTrigger('type', event.target.value)}>
+          <option value="time_delay">Time delay</option>
+          <option value="exit_intent">Exit intent</option>
+          <option value="scroll_percentage">Scroll depth</option>
+        </select>
+      </label>
+      {config.trigger.type === 'time_delay' && (
+        <label className="editor-field"><span>Delay (seconds)</span><input type="number" min="1" max="120" value={config.trigger.delay_seconds} onChange={(event) => updateTrigger('delay_seconds', event.target.value)} /></label>
+      )}
+      {config.trigger.type === 'scroll_percentage' && (
+        <label className="editor-field"><span>Scroll depth (%)</span><input type="number" min="10" max="95" value={config.trigger.scroll_percentage} onChange={(event) => updateTrigger('scroll_percentage', event.target.value)} /></label>
+      )}
+      <div className="editor-field editor-field--wide">
+        <span>Popup colors</span>
+        <div className="color-edit-row">
+          {[
+            ['background_color', 'Background'],
+            ['text_color', 'Text'],
+            ['accent_color', 'Button'],
+          ].map(([field, label]) => (
+            <label key={field} className="color-edit-control"><input type="color" value={config.theme[field]} onChange={(event) => updateTheme(field, event.target.value)} /><span>{label}</span></label>
+          ))}
+        </div>
+      </div>
+      <div className="editor-field editor-field--wide">
+        <span>Artwork</span>
+        <div className="image-edit-row">
+          {config.image ? <img src={config.image} alt="Current popup artwork" /> : <span className="image-empty"><ImagePlus size={17} /> No image selected</span>}
+          <label className="secondary-button upload-button">
+            {uploading ? <span className="button-spinner button-spinner--dark" /> : <Upload size={15} />}
+            {uploading ? 'Uploading…' : config.image ? 'Replace image' : 'Upload image'}
+            <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => onUploadImage(event.target.files?.[0])} disabled={uploading} />
+          </label>
+          {config.image && <button className="text-button" type="button" onClick={() => onChange({ ...config, image: null })}>Remove</button>}
+        </div>
+        <small>JPEG, PNG, or WebP. Maximum 5 MB.</small>
+      </div>
+    </div>
+  );
+}
+
+function Studio({ result, campaign, generated, hostname, token, onBack, onNewSite }) {
+  const [variants, setVariants] = useState(generated.variants);
+  const [campaignStatus, setCampaignStatus] = useState(campaign.status);
   const [selected, setSelected] = useState(generated.variants[0]?.label || 'A');
-  const selectedVariant = generated.variants.find((variant) => variant.label === selected) || generated.variants[0];
+  const selectedVariant = variants.find((variant) => variant.label === selected) || variants[0];
+  const [config, setConfig] = useState(selectedVariant.config);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [instruction, setInstruction] = useState('');
+  const [error, setError] = useState('');
+  const [publishResult, setPublishResult] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  function selectVariant(label) {
+    const next = variants.find((variant) => variant.label === label);
+    if (!next) return;
+    setSelected(label);
+    setConfig(next.config);
+    setDirty(false);
+    setError('');
+  }
+
+  function changeConfig(nextConfig) {
+    setConfig(nextConfig);
+    setDirty(true);
+  }
+
+  function replaceVariantConfig(nextConfig) {
+    setConfig(nextConfig);
+    setVariants((current) => current.map((variant) => (
+      variant.label === selected ? { ...variant, config: nextConfig } : variant
+    )));
+    setDirty(false);
+  }
+
+  async function saveChanges() {
+    setBusy(true);
+    setError('');
+    try {
+      const version = selectedVariant.version_id;
+      const saved = await updatePopupVersion(version, config, token);
+      replaceVariantConfig(saved.config);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function regenerate() {
+    if (!instruction.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      const versionId = selectedVariant.version_id;
+      if (dirty) {
+        const draft = await updatePopupVersion(versionId, config, token);
+        replaceVariantConfig(draft.config);
+      }
+      const saved = await regeneratePopupVersion(versionId, instruction.trim(), token);
+      replaceVariantConfig(saved.config);
+      setInstruction('');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUpload(file) {
+    if (!file) return;
+    setError('');
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Choose an image that is 5 MB or smaller.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const uploaded = await uploadPopupImage(file, token);
+      changeConfig({ ...config, image: uploaded.url });
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function publish() {
+    setBusy(true);
+    setError('');
+    try {
+      let versionId = selectedVariant.version_id;
+      if (dirty) {
+        const saved = await updatePopupVersion(versionId, config, token);
+        replaceVariantConfig(saved.config);
+      }
+      const publishResponse = await publishCampaign(campaign.id, versionId, token);
+      setPublishResult(publishResponse);
+      setCampaignStatus('published');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copySnippet() {
+    await navigator.clipboard.writeText(publishResult.embed_snippet);
+    setCopied(true);
+  }
 
   return (
     <div className="studio-view">
       <div className="studio-toolbar">
         <button className="back-button" onClick={onBack} type="button"><ArrowLeft size={16} /> New analysis</button>
-        <div className="toolbar-right"><span className="draft-badge"><i /> DRAFT</span><button className="icon-button" type="button" title="More options"><ChevronDown size={16} /></button></div>
+        <div className="toolbar-right"><span className={`draft-badge ${campaignStatus === 'published' ? 'draft-badge--published' : ''}`}><i /> {campaignStatus.toUpperCase()}</span><button className="icon-button" type="button" title="More options"><ChevronDown size={16} /></button></div>
       </div>
       <div className="studio-heading-row">
         <div>
@@ -244,8 +435,8 @@ function Studio({ result, generated, hostname, onBack, onNewSite }) {
       <div className="variant-area">
         <div className="variant-heading"><div><span className="eyebrow">PICK A DIRECTION</span><span className="variant-count">3 concepts</span></div><span className="generated-note"><Sparkles size={14} /> AI-generated, yours to shape</span></div>
         <div className="variant-list">
-          {generated.variants.map((variant) => (
-            <VariantTile key={variant.label} variant={variant} selected={variant.label === selected} onSelect={() => setSelected(variant.label)} />
+          {variants.map((variant) => (
+            <VariantTile key={variant.label} variant={variant} selected={variant.label === selected} onSelect={() => selectVariant(variant.label)} />
           ))}
         </div>
       </div>
@@ -257,11 +448,35 @@ function Studio({ result, generated, hostname, onBack, onNewSite }) {
             <div><span className="eyebrow">ON YOUR SITE</span><h2>Popup preview</h2></div>
             <span className="variant-live-label"><span className={`variant-letter variant-letter--${selected.toLowerCase()}`}>{selected}</span>{toneNames[selectedVariant.tone] || selectedVariant.tone}</span>
           </div>
-          <PreviewBrowser config={selectedVariant.config} hostname={hostname} />
-          <div className="preview-footnote"><span><Check size={13} /> Rendered from your popup config</span><span>Changes aren’t saved yet</span></div>
+          <PreviewBrowser config={config} hostname={hostname} />
+          <div className="preview-footnote"><span><Check size={13} /> Rendered from your popup config</span><span>{dirty ? 'Unsaved changes' : 'Saved draft'}</span></div>
+
+          <div className="editor-section">
+            <div className="editor-section-heading"><div><span className="eyebrow">MAKE IT YOURS</span><h3>Edit this direction</h3></div><button className="primary-button save-button" type="button" onClick={saveChanges} disabled={!dirty || busy}>{busy && !publishResult ? 'Saving…' : <><Save size={14} /> Save changes</>}</button></div>
+            <PopupEditor config={config} onChange={changeConfig} onUploadImage={handleUpload} uploading={uploading} />
+            <div className="regenerate-box">
+              <span className="regenerate-icon"><WandSparkles size={16} /></span>
+              <div className="regenerate-content"><label htmlFor="regenerate-instruction">Ask for a focused change</label><div className="regenerate-row"><input id="regenerate-instruction" placeholder="e.g. Make the headline more understated" maxLength={500} value={instruction} onChange={(event) => setInstruction(event.target.value)} /><button className="secondary-button" type="button" onClick={regenerate} disabled={busy || instruction.trim().length < 3}><WandSparkles size={14} /> Regenerate</button></div><small>Only copy, colors, trigger, and image fields may change.</small></div>
+            </div>
+            {error && <p className="form-error" role="alert">{error}</p>}
+            <div className="publish-row"><div><strong>Ready to put it to work?</strong><small>Publishing makes this direction the campaign default.</small></div><button className="primary-button publish-button" type="button" onClick={publish} disabled={busy}>{busy ? 'Publishing…' : <>Publish popup <ArrowRight size={16} /></>}</button></div>
+          </div>
         </section>
       </div>
-      <div className="studio-bottom-note"><ArrowDownRight size={15} /> Choose the direction that feels most like you. Editing and publishing are next.</div>
+      <div className="studio-bottom-note"><ArrowDownRight size={15} /> Your draft is yours to shape. Publish when the welcome feels right.</div>
+
+      {publishResult && (
+        <div className="modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setPublishResult(null); }}>
+          <section className="publish-modal" role="dialog" aria-modal="true" aria-labelledby="publish-title">
+            <div className="publish-success-mark"><Check size={20} /></div>
+            <p className="eyebrow">CAMPAIGN PUBLISHED</p>
+            <h2 id="publish-title">Your popup is ready to travel.</h2>
+            <p>Add this embed snippet to your site to show the selected popup.</p>
+            <div className="snippet-box"><code>{publishResult.embed_snippet}</code><button className="icon-button" type="button" onClick={copySnippet} title="Copy embed snippet">{copied ? <Check size={15} /> : <Copy size={15} />}</button></div>
+            <button className="primary-button modal-done" type="button" onClick={() => setPublishResult(null)}>Done</button>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -273,7 +488,23 @@ function Builder({ token, email, onLogout }) {
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
   const [generated, setGenerated] = useState(null);
+  const [campaign, setCampaign] = useState(null);
   const hostname = result ? new URL(result.url).hostname.replace(/^www\./, '') : '';
+
+  async function saveGeneratedCampaign(analysisResult, popupResult) {
+    const savedCampaign = await createCampaign(
+      analysisResult.website_id,
+      `${new URL(analysisResult.url).hostname.replace(/^www\./, '')} welcome popup`,
+      popupResult.variants,
+      token,
+    );
+    const variants = popupResult.variants.map((variant) => {
+      const savedVersion = savedCampaign.versions.find((item) => item.label === variant.label);
+      return { ...variant, version_id: savedVersion.id, config: savedVersion.config };
+    });
+    setCampaign(savedCampaign);
+    setGenerated({ variants });
+  }
 
   async function submit(event) {
     event.preventDefault();
@@ -285,7 +516,7 @@ function Builder({ token, email, onLogout }) {
       setResult(analysisResult);
       setBusyMessage('Finding your first hello…');
       const popupResult = await generatePopups(analysisResult.analysis, token);
-      setGenerated(popupResult);
+      await saveGeneratedCampaign(analysisResult, popupResult);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -297,6 +528,7 @@ function Builder({ token, email, onLogout }) {
   function reset() {
     setResult(null);
     setGenerated(null);
+    setCampaign(null);
     setError('');
   }
 
@@ -359,7 +591,7 @@ function Builder({ token, email, onLogout }) {
               <div className="create-footer"><span>FIELDNOTE STUDIO</span><span>Thoughtful first impressions, by design.</span><span>V 0.1</span></div>
             </section>
           ) : generated ? (
-            <Studio result={result} generated={generated} hostname={hostname} onBack={reset} onNewSite={reset} />
+            <Studio result={result} campaign={campaign} generated={generated} hostname={hostname} token={token} onBack={reset} onNewSite={reset} />
           ) : (
             <div className="analysis-complete">
               <div className="analysis-success-icon"><Check size={20} /></div>
@@ -369,7 +601,10 @@ function Builder({ token, email, onLogout }) {
               <button className="primary-button" onClick={async () => {
                 setBusy(true);
                 setError('');
-                try { setGenerated(await generatePopups(result.analysis, token)); }
+                try {
+                  const popupResult = await generatePopups(result.analysis, token);
+                  await saveGeneratedCampaign(result, popupResult);
+                }
                 catch (requestError) { setError(requestError.message); }
                 finally { setBusy(false); }
               }} type="button" disabled={busy}>{busy ? 'Creating concepts…' : 'Generate popup concepts'} <ArrowRight size={17} /></button>

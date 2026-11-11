@@ -1,4 +1,6 @@
+from app.config import get_settings
 from fastapi import Depends, FastAPI
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -11,6 +13,9 @@ app = FastAPI(title="AI Popup Generator API", version="0.1.0")
 app.include_router(auth_router)
 app.include_router(popups_router)
 app.include_router(websites_router)
+media_dir = get_settings().media_dir
+media_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/media", StaticFiles(directory=media_dir), name="media")
 
 
 @app.get("/health", tags=["health"])

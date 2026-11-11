@@ -1,5 +1,6 @@
 from enum import StrEnum
 from typing import Self
+from uuid import UUID
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -107,3 +108,81 @@ class GeneratePopupsRequest(StrictModel):
 
 class GeneratePopupsResponse(StrictModel):
     variants: list[PopupVariant] = Field(min_length=3, max_length=3)
+
+
+class CreateCampaignRequest(StrictModel):
+    website_id: UUID
+    name: str = Field(min_length=1, max_length=200)
+    variants: list[PopupVariant] = Field(min_length=3, max_length=3)
+
+    @model_validator(mode="after")
+    def validate_variants(self) -> Self:
+        PopupVariants(variants=self.variants)
+        return self
+
+
+class PopupVersionResponse(StrictModel):
+    id: UUID
+    label: str
+    config: PopupConfig
+
+
+class CampaignDraftResponse(StrictModel):
+    id: UUID
+    website_id: UUID
+    name: str
+    status: str
+    versions: list[PopupVersionResponse]
+
+
+class UpdatePopupVersionRequest(StrictModel):
+    config: PopupConfig
+
+
+class PopupTriggerPatch(StrictModel):
+    type: PopupTriggerType | None = None
+    delay_seconds: int | None = Field(default=None, ge=1, le=120)
+    scroll_percentage: int | None = Field(default=None, ge=10, le=95)
+
+
+class PopupThemePatch(StrictModel):
+    background_color: str | None = None
+    text_color: str | None = None
+    accent_color: str | None = None
+    font: PopupFont | None = None
+    border_radius: int | None = Field(default=None, ge=0, le=24)
+
+    @field_validator("background_color", "text_color", "accent_color")
+    @classmethod
+    def validate_optional_hex_color(cls, color: str | None) -> str | None:
+        if color is None:
+            return color
+        return PopupTheme.validate_hex_color(color)
+
+
+class PopupConfigPatch(StrictModel):
+    headline: str | None = Field(default=None, min_length=2, max_length=90)
+    description: str | None = Field(default=None, min_length=2, max_length=240)
+    cta: str | None = Field(default=None, min_length=2, max_length=40)
+    trigger: PopupTriggerPatch | None = None
+    theme: PopupThemePatch | None = None
+    image: AnyHttpUrl | None = None
+
+
+class RegeneratePopupRequest(StrictModel):
+    instruction: str = Field(min_length=3, max_length=500)
+
+
+class PublishCampaignRequest(StrictModel):
+    version_id: UUID
+
+
+class PublishCampaignResponse(StrictModel):
+    campaign_id: UUID
+    status: str
+    default_version_id: UUID
+    embed_snippet: str
+
+
+class ImageUploadResponse(StrictModel):
+    url: AnyHttpUrl

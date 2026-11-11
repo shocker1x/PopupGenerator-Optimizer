@@ -14,7 +14,9 @@ export function clearToken() {
 
 async function request(path, { token, ...options } = {}) {
   const headers = new Headers(options.headers || {});
-  if (options.body) headers.set('Content-Type', 'application/json');
+  if (options.body && !(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
   let response;
@@ -63,5 +65,47 @@ export function generatePopups(analysis, token) {
     method: 'POST',
     token,
     body: JSON.stringify({ analysis }),
+  });
+}
+
+export function createCampaign(websiteId, name, variants, token) {
+  return request('/api/popups/campaigns', {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ website_id: websiteId, name, variants }),
+  });
+}
+
+export function updatePopupVersion(versionId, config, token) {
+  return request(`/api/popups/versions/${versionId}`, {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify({ config }),
+  });
+}
+
+export function regeneratePopupVersion(versionId, instruction, token) {
+  return request(`/api/popups/versions/${versionId}/regenerate`, {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ instruction }),
+  });
+}
+
+export function uploadPopupImage(file, token) {
+  const formData = new FormData();
+  formData.append('image', file);
+  return request('/api/popups/images', {
+    method: 'POST',
+    token,
+    body: formData,
+  });
+}
+
+export function publishCampaign(campaignId, versionId, token) {
+  return request(`/api/popups/campaigns/${campaignId}/publish`, {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ version_id: versionId }),
   });
 }
