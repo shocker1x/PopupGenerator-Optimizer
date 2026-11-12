@@ -320,6 +320,37 @@ button:disabled { cursor: not-allowed; opacity: .7; }
 .snippet-box code { overflow: auto; flex: 1; color: #4a5d50; font-size: 9px; white-space: nowrap; }
 .snippet-box .icon-button { flex: 0 0 auto; }
 .modal-done { width: 100%; margin-top: 16px; }
+.analytics-panel { padding: 18px 17px; margin-top: 16px; border: 1px solid #e2e8df; border-radius: 7px; background: #fff; }
+.analytics-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 15px; }
+.analytics-heading .eyebrow { font-size: 8px; }
+.analytics-heading h3 { margin: 3px 0 0; color: #35493d; font-family: var(--serif); font-size: 18px; font-weight: 400; }
+.analytics-actions { display: flex; gap: 7px; }
+.analytics-actions .secondary-button { min-height: 31px; font-size: 8px; }
+.metric-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid #e8ede6; border-radius: 5px; background: #f9faf7; }
+.metric-cell { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 11px 12px; border-right: 1px solid #e8ede6; }
+.metric-cell:last-child { border-right: 0; }
+.metric-cell span { color: #89958b; font-size: 8px; }
+.metric-cell strong { color: #3e5847; font-size: 17px; font-weight: 600; }
+.analytics-table-wrap { overflow-x: auto; margin-top: 14px; }
+.analytics-table { width: 100%; border-collapse: collapse; text-align: left; }
+.analytics-table th { padding: 8px 9px; border-bottom: 1px solid #e8ede6; color: #929d94; font-size: 8px; font-weight: 600; white-space: nowrap; }
+.analytics-table td { padding: 8px 9px; border-bottom: 1px solid #f0f2ee; color: #5f7064; font-size: 9px; white-space: nowrap; }
+.analytics-table tr:last-child td { border-bottom: 0; }
+.analytics-table td:first-child .variant-letter { width: 20px; height: 20px; font-size: 8px; }
+.subscriber-heading { display: flex; justify-content: space-between; align-items: center; padding: 15px 0 8px; margin-top: 8px; border-top: 1px solid #e9ede7; }
+.subscriber-heading > div { display: flex; align-items: baseline; gap: 8px; }
+.subscriber-heading strong { color: #4a5e50; font-size: 10px; }
+.subscriber-heading span { color: #929d94; font-size: 8px; }
+.subscriber-list { display: flex; flex-direction: column; }
+.subscriber-row { display: flex; align-items: center; gap: 9px; min-height: 43px; border-bottom: 1px solid #f0f2ee; }
+.subscriber-row:last-child { border-bottom: 0; }
+.subscriber-avatar { display: grid; flex: 0 0 auto; place-items: center; width: 25px; height: 25px; border-radius: 50%; color: #3f624a; background: #e4efda; font-size: 9px; font-weight: 700; }
+.subscriber-copy { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.subscriber-copy strong { overflow: hidden; color: #516357; font-size: 9px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.subscriber-copy small { color: #9aa39b; font-size: 8px; }
+.delete-subscriber { width: 27px; height: 27px; border-color: transparent; color: #9a8178; background: transparent; }
+.delete-subscriber:hover { border-color: #ead9d4; color: #a64e3e; background: #fbf3f0; }
+.empty-subscribers { padding: 10px 0; margin: 0; color: #929d94; font-size: 9px; }
 
 @keyframes rise-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes popup-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
@@ -400,6 +431,12 @@ button:disabled { cursor: not-allowed; opacity: .7; }
   .publish-row { align-items: flex-start; flex-direction: column; }
   .publish-button { width: 100%; }
   .publish-modal { padding: 22px 18px; }
+  .analytics-panel { padding: 14px 10px; }
+  .analytics-heading { align-items: flex-start; flex-direction: column; }
+  .metric-cell { padding: 9px 7px; }
+  .metric-cell span { min-height: 20px; line-height: 1.3; }
+  .metric-cell strong { font-size: 15px; }
+  .analytics-table th, .analytics-table td { padding-right: 6px; padding-left: 6px; }
   .auth-panel { padding: 22px; }
   .auth-mobile-brand { margin-bottom: 43px; }
   .auth-topline { margin-bottom: 39px; }

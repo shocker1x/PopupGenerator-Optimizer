@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -23,6 +24,22 @@ media_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=media_dir), name="media")
 widget_script = Path(__file__).resolve().parents[2] / "widget" / "popup.js"
 widget_test_page = Path(__file__).resolve().parents[2] / "frontend" / "public" / "widget-test.html"
+MAX_PUBLIC_REQUEST_BYTES = 16 * 1024
+
+
+@app.middleware("http")
+async def limit_public_payload_size(request, call_next):
+    if (
+        request.method == "POST"
+        and request.url.path.startswith("/api/public/campaigns/")
+    ):
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit() and int(content_length) > MAX_PUBLIC_REQUEST_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "Public request payload is too large"},
+            )
+    return await call_next(request)
 
 
 @app.get("/widget.js", include_in_schema=False)

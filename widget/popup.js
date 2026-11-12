@@ -48,6 +48,19 @@
     return visitorId;
   }
 
+  function recordEvent(campaign, version, visitor, type) {
+    fetch(`${apiBase}/api/public/campaigns/${encodeURIComponent(campaign)}/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
+      body: JSON.stringify({
+        version_id: version,
+        visitor_id: visitor,
+        type,
+      }),
+    }).catch(() => {});
+  }
+
   function isSuppressed() {
     if (readStorage(keys.subscribed) === 'true') return true;
     const shownUntil = Number(readStorage(keys.shown) || 0);
@@ -172,6 +185,7 @@
     const close = () => {
       if (closed) return;
       closed = true;
+      recordEvent(campaign, version, getVisitorId(), 'close');
       host.remove();
       if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
     };
@@ -207,11 +221,10 @@
       status.className = 'status';
       status.textContent = 'Submitting…';
       try {
-        const response = await fetch(`${apiBase}/api/public/subscribe`, {
+        const response = await fetch(`${apiBase}/api/public/campaigns/${encodeURIComponent(campaign)}/subscribe`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            campaign_id: campaign,
             version_id: version,
             visitor_id: getVisitorId(),
             email: email.value.trim(),
@@ -256,6 +269,7 @@
       window.clearTimeout(timerId);
       removeTriggerListeners();
       writeStorage(keys.shown, String(Date.now() + frequencyDays * 24 * 60 * 60 * 1000));
+      recordEvent(published.campaign_id, published.version_id, getVisitorId(), 'impression');
       renderPopup(published.campaign_id, published.version_id, config);
     };
 

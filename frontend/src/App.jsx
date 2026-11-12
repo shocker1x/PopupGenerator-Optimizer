@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowDownRight,
   ArrowLeft,
@@ -8,6 +8,7 @@ import {
   CircleHelp,
   Clock3,
   Copy,
+  Download,
   ExternalLink,
   Globe2,
   ImagePlus,
@@ -19,6 +20,7 @@ import {
   Save,
   ScanSearch,
   Sparkles,
+  Trash2,
   Upload,
   WandSparkles,
 } from 'lucide-react';
@@ -28,6 +30,10 @@ import {
   authenticate,
   clearToken,
   createCampaign,
+  deleteCampaignSubscriber,
+  exportCampaignSubscribers,
+  getCampaignAnalytics,
+  getCampaignSubscribers,
   generatePopups,
   getToken,
   publishCampaign,
@@ -318,6 +324,31 @@ function Studio({ result, campaign, generated, hostname, token, onBack, onNewSit
   const [error, setError] = useState('');
   const [publishResult, setPublishResult] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [analytics, setAnalytics] = useState(null);
+  const [subscribers, setSubscribers] = useState([]);
+  const [analyticsBusy, setAnalyticsBusy] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState('');
+
+  async function refreshAnalytics() {
+    setAnalyticsBusy(true);
+    setAnalyticsError('');
+    try {
+      const [report, subscriberRows] = await Promise.all([
+        getCampaignAnalytics(campaign.id, token),
+        getCampaignSubscribers(campaign.id, token),
+      ]);
+      setAnalytics(report);
+      setSubscribers(subscriberRows);
+    } catch (requestError) {
+      setAnalyticsError(requestError.message);
+    } finally {
+      setAnalyticsBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (campaignStatus === 'published') void refreshAnalytics();
+  }, [campaignStatus, campaign.id, token]);
 
   function selectVariant(label) {
     const next = variants.find((variant) => variant.label === label);
@@ -417,6 +448,31 @@ function Studio({ result, campaign, generated, hostname, token, onBack, onNewSit
     setCopied(true);
   }
 
+  async function exportSubscribers() {
+    try {
+      const blob = await exportCampaignSubscribers(campaign.id, token);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `campaign-${campaign.id}-subscribers.csv`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (requestError) {
+      setAnalyticsError(requestError.message);
+    }
+  }
+
+  async function removeSubscriber(subscriberId) {
+    const subscriber = subscribers.find((item) => item.id === subscriberId);
+    if (!subscriber || !window.confirm(`Permanently delete ${subscriber.email}?`)) return;
+    try {
+      await deleteCampaignSubscriber(campaign.id, subscriberId, token);
+      setSubscribers((current) => current.filter((subscriber) => subscriber.id !== subscriberId));
+      await refreshAnalytics();
+    } catch (requestError) {
+      setAnalyticsError(requestError.message);
+    }
+  }
+
   return (
     <div className="studio-view">
       <div className="studio-toolbar">
@@ -461,6 +517,32 @@ function Studio({ result, campaign, generated, hostname, token, onBack, onNewSit
             {error && <p className="form-error" role="alert">{error}</p>}
             <div className="publish-row"><div><strong>Ready to put it to work?</strong><small>Publishing makes this direction the campaign default.</small></div><button className="primary-button publish-button" type="button" onClick={publish} disabled={busy}>{busy ? 'Publishing…' : <>Publish popup <ArrowRight size={16} /></>}</button></div>
           </div>
+          {campaignStatus === 'published' && (
+            <section className="analytics-panel">
+              <div className="analytics-heading">
+                <div><span className="eyebrow">CAMPAIGN PERFORMANCE</span><h3>How it’s landing</h3></div>
+                <div className="analytics-actions"><button className="secondary-button" type="button" onClick={refreshAnalytics} disabled={analyticsBusy}>{analyticsBusy ? 'Refreshing…' : 'Refresh'}</button><button className="secondary-button" type="button" onClick={exportSubscribers}><Download size={14} /> Export CSV</button></div>
+              </div>
+              {analyticsError && <p className="form-error" role="alert">{analyticsError}</p>}
+              {analytics ? (
+                <>
+                  <div className="metric-row">
+                    <div className="metric-cell"><span>Impressions</span><strong>{analytics.impressions}</strong></div>
+                    <div className="metric-cell"><span>Signups</span><strong>{analytics.submissions}</strong></div>
+                    <div className="metric-cell"><span>Conversion</span><strong>{analytics.conversion_rate}%</strong></div>
+                    <div className="metric-cell"><span>Dismissals</span><strong>{analytics.versions.reduce((sum, item) => sum + item.dismissals, 0)}</strong></div>
+                  </div>
+                  <div className="analytics-table-wrap">
+                    <table className="analytics-table"><thead><tr><th>Variant</th><th>Impressions</th><th>Signups</th><th>Conversion</th><th>Dismissals</th></tr></thead><tbody>
+                      {analytics.versions.map((row) => <tr key={row.version_id}><td><span className={`variant-letter variant-letter--${row.label.toLowerCase()}`}>{row.label}</span></td><td>{row.impressions}</td><td>{row.submissions}</td><td>{row.conversion_rate}%</td><td>{row.dismissals}</td></tr>)}
+                    </tbody></table>
+                  </div>
+                  <div className="subscriber-heading"><div><strong>Subscribers</strong><span>{subscribers.length}{subscribers.length === 500 ? '+' : ''} shown</span></div></div>
+                  {subscribers.length ? <div className="subscriber-list">{subscribers.map((subscriber) => <div className="subscriber-row" key={subscriber.id}><span className="subscriber-avatar">{subscriber.email.slice(0, 1).toUpperCase()}</span><div className="subscriber-copy"><strong>{subscriber.email}</strong><small>Consented {new Date(subscriber.consented_at).toLocaleDateString()}</small></div><button className="icon-button delete-subscriber" type="button" title="Delete subscriber" onClick={() => removeSubscriber(subscriber.id)}><Trash2 size={14} /></button></div>)}</div> : <p className="empty-subscribers">No subscribers yet. New signups will appear here.</p>}
+                </>
+              ) : !analyticsBusy && !analyticsError ? <p className="empty-subscribers">Performance data will appear after the popup is shown.</p> : null}
+            </section>
+          )}
         </section>
       </div>
       <div className="studio-bottom-note"><ArrowDownRight size={15} /> Your draft is yours to shape. Publish when the welcome feels right.</div>

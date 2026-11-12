@@ -1,16 +1,18 @@
+import csv
+import io
 import uuid
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import JSONResponse
 from PIL import Image
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from starlette.responses import Response
 
 from app.api.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
-from app.models import Campaign, PopupVersion, User, Website
+from app.models import Campaign, Event, PopupVersion, Subscriber, User, Website
 from app.schemas.popup import (
     CampaignDraftResponse,
     CreateCampaignRequest,
@@ -235,3 +237,156 @@ async def upload_popup_image(
 
     base_url = get_settings().public_api_base_url.rstrip("/")
     return ImageUploadResponse(url=f"{base_url}/media/{filename}")
+
+
+def _owned_campaign(db: Session, campaign_id: uuid.UUID, user_id: uuid.UUID) -> Campaign:
+    campaign = db.scalar(
+        select(Campaign)
+        .join(Website, Campaign.website_id == Website.id)
+        .where(Campaign.id == campaign_id, Website.user_id == user_id)
+    )
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return campaign
+
+
+@router.get("/campaigns/{campaign_id}/analytics")
+def get_campaign_analytics(
+    campaign_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    campaign = _owned_campaign(db, campaign_id, current_user.id)
+    versions = db.scalars(
+        select(PopupVersion)
+        .where(PopupVersion.campaign_id == campaign.id)
+        .order_by(PopupVersion.label)
+    ).all()
+    events = db.scalars(select(Event).where(Event.campaign_id == campaign.id)).all()
+    subscriber_count = db.scalar(
+        select(func.count(Subscriber.id)).where(Subscriber.campaign_id == campaign.id)
+    ) or 0
+
+    counts: dict[uuid.UUID, dict[str, int]] = {
+        version.id: {"impressions": 0, "submissions": 0, "dismissals": 0}
+        for version in versions
+    }
+    for event in events:
+        version_counts = counts.get(event.version_id)
+        if version_counts is None:
+            continue
+        if event.type == "impression":
+            version_counts["impressions"] += 1
+        elif event.type == "submit":
+            version_counts["submissions"] += 1
+        elif event.type == "close":
+            version_counts["dismissals"] += 1
+
+    version_rows = []
+    for version in versions:
+        values = counts[version.id]
+        impressions = values["impressions"]
+        version_rows.append(
+            {
+                "version_id": version.id,
+                "label": version.label,
+                **values,
+                "conversion_rate": (
+                    round(values["submissions"] / impressions * 100, 2)
+                    if impressions
+                    else 0.0
+                ),
+            }
+        )
+
+    total_impressions = sum(row["impressions"] for row in version_rows)
+    return {
+        "campaign_id": campaign.id,
+        "campaign_name": campaign.name,
+        "status": campaign.status,
+        "impressions": total_impressions,
+        "submissions": subscriber_count,
+        "conversion_rate": (
+            round(subscriber_count / total_impressions * 100, 2)
+            if total_impressions
+            else 0.0
+        ),
+        "versions": version_rows,
+    }
+
+
+@router.get("/campaigns/{campaign_id}/subscribers")
+def get_campaign_subscribers(
+    campaign_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    campaign = _owned_campaign(db, campaign_id, current_user.id)
+    subscribers = db.scalars(
+        select(Subscriber)
+        .where(Subscriber.campaign_id == campaign.id)
+        .order_by(Subscriber.created_at.desc())
+        .limit(500)
+    ).all()
+    return [
+        {
+            "id": subscriber.id,
+            "email": subscriber.email,
+            "consent_text": subscriber.consent_text,
+            "consented_at": subscriber.consented_at,
+            "created_at": subscriber.created_at,
+        }
+        for subscriber in subscribers
+    ]
+
+
+@router.get("/campaigns/{campaign_id}/subscribers.csv")
+def export_campaign_subscribers(
+    campaign_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    campaign = _owned_campaign(db, campaign_id, current_user.id)
+    subscribers = db.scalars(
+        select(Subscriber)
+        .where(Subscriber.campaign_id == campaign.id)
+        .order_by(Subscriber.created_at.desc())
+    ).all()
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(["email", "consent_text", "consented_at", "created_at"])
+    for subscriber in subscribers:
+        writer.writerow(
+            [
+                subscriber.email,
+                subscriber.consent_text,
+                subscriber.consented_at.isoformat(),
+                subscriber.created_at.isoformat() if subscriber.created_at else "",
+            ]
+        )
+    filename = f"campaign-{campaign.id}-subscribers.csv"
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/campaigns/{campaign_id}/subscribers/{subscriber_id}", status_code=204)
+def delete_campaign_subscriber(
+    campaign_id: uuid.UUID,
+    subscriber_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    campaign = _owned_campaign(db, campaign_id, current_user.id)
+    subscriber = db.scalar(
+        select(Subscriber).where(
+            Subscriber.id == subscriber_id,
+            Subscriber.campaign_id == campaign.id,
+        )
+    )
+    if subscriber is None:
+        raise HTTPException(status_code=404, detail="Subscriber not found")
+    db.delete(subscriber)
+    db.commit()

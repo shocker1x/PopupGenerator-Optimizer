@@ -109,3 +109,31 @@ export function publishCampaign(campaignId, versionId, token) {
     body: JSON.stringify({ version_id: versionId }),
   });
 }
+
+export function getCampaignAnalytics(campaignId, token) {
+  return request(`/api/popups/campaigns/${campaignId}/analytics`, { token });
+}
+
+export function getCampaignSubscribers(campaignId, token) {
+  return request(`/api/popups/campaigns/${campaignId}/subscribers`, { token });
+}
+
+export function deleteCampaignSubscriber(campaignId, subscriberId, token) {
+  return request(`/api/popups/campaigns/${campaignId}/subscribers/${subscriberId}`, {
+    method: 'DELETE',
+    token,
+  });
+}
+
+export async function exportCampaignSubscribers(campaignId, token) {
+  let response;
+  try {
+    response = await fetch(`/api/popups/campaigns/${campaignId}/subscribers.csv`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    throw new Error('Can’t reach the API. Start the backend and try again.');
+  }
+  if (!response.ok) throw new Error(`Could not export subscribers (${response.status})`);
+  return response.blob();
+}
