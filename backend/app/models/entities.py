@@ -9,7 +9,9 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    Boolean,
     func,
+    true,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
@@ -49,6 +51,9 @@ class Campaign(Base):
     )
     name: Mapped[str] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(20), default="draft")
+    ab_test_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
     default_version_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey(
             "popup_versions.id",

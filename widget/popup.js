@@ -249,8 +249,9 @@
   async function start() {
     if (isSuppressed()) return;
     let published;
+    const visitorId = getVisitorId();
     try {
-      const response = await fetch(`${apiBase}/api/public/campaigns/${encodeURIComponent(campaignId)}/config`, {
+      const response = await fetch(`${apiBase}/api/public/campaigns/${encodeURIComponent(campaignId)}/config/${encodeURIComponent(visitorId)}`, {
         headers: { Accept: 'application/json' },
       });
       if (!response.ok) return;

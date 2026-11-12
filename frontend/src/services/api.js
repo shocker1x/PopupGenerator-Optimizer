@@ -137,3 +137,11 @@ export async function exportCampaignSubscribers(campaignId, token) {
   if (!response.ok) throw new Error(`Could not export subscribers (${response.status})`);
   return response.blob();
 }
+
+export function makePopupVersionDefault(campaignId, versionId, token) {
+  return request(`/api/popups/campaigns/${campaignId}/default`, {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ version_id: versionId }),
+  });
+}

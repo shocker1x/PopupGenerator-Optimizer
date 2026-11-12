@@ -37,6 +37,8 @@ class AnalyticsDatabase:
             )
         if "from campaigns" in statement:
             return self.campaign
+        if "from popup_versions" in statement:
+            return self.versions[0] if self.versions else None
         return None
 
     def scalars(self, query):
@@ -62,7 +64,8 @@ class CampaignAnalyticsAPITests(unittest.TestCase):
         self.db = AnalyticsDatabase()
         self.user = User(id=uuid.uuid4(), email="owner@example.com", password_hash="unused")
         self.campaign = Campaign(
-            id=uuid.uuid4(), website_id=uuid.uuid4(), name="Northstar welcome", status="published"
+            id=uuid.uuid4(), website_id=uuid.uuid4(), name="Northstar welcome", status="published",
+            ab_test_enabled=True,
         )
         self.version_a = PopupVersion(
             id=uuid.uuid4(), campaign_id=self.campaign.id, config_json={}, label="A", created_by="ai"
@@ -105,6 +108,17 @@ class CampaignAnalyticsAPITests(unittest.TestCase):
         self.assertEqual(by_label["A"]["conversion_rate"], 3.0)
         self.assertEqual(by_label["A"]["dismissals"], 2)
         self.assertEqual(by_label["B"]["conversion_rate"], 4.0)
+        self.assertEqual(report["recommendation"]["decision"], "not_enough_data")
+        self.assertTrue(report["ab_test_enabled"])
+
+    def test_make_default_disables_rotation(self):
+        response = self.client.post(
+            f"/api/popups/campaigns/{self.campaign.id}/default",
+            json={"version_id": str(self.version_a.id)},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.campaign.default_version_id, self.version_a.id)
+        self.assertFalse(self.campaign.ab_test_enabled)
 
     def test_subscriber_csv_contains_consent_and_email(self):
         response = self.client.get(

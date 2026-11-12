@@ -27,6 +27,7 @@ from app.schemas.popup import (
 )
 from app.services.popup_regenerator import PopupRegenerationError, regenerate_popup
 from app.services.popup_generator import PopupGenerationError, generate_popup_variants
+from app.services.stats import compare_variants
 
 router = APIRouter(prefix="/api/popups", tags=["popups"])
 
@@ -205,6 +206,41 @@ def publish_campaign(
     )
 
 
+@router.post("/campaigns/{campaign_id}/default", response_model=PublishCampaignResponse)
+def make_popup_version_default(
+    campaign_id: uuid.UUID,
+    payload: PublishCampaignRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PublishCampaignResponse:
+    campaign = _owned_campaign(db, campaign_id, current_user.id)
+    if campaign.status != "published":
+        raise HTTPException(status_code=409, detail="Publish the campaign before choosing a default")
+    version = db.scalar(
+        select(PopupVersion).where(
+            PopupVersion.id == payload.version_id,
+            PopupVersion.campaign_id == campaign.id,
+        )
+    )
+    if version is None:
+        raise HTTPException(status_code=404, detail="Popup version not found")
+
+    campaign.default_version_id = version.id
+    campaign.ab_test_enabled = False
+    db.commit()
+    base_url = get_settings().public_api_base_url.rstrip("/")
+    snippet = (
+        f'<script src="{base_url}/widget.js" '
+        f'data-campaign-id="{campaign.id}" async></script>'
+    )
+    return PublishCampaignResponse(
+        campaign_id=campaign.id,
+        status=campaign.status,
+        default_version_id=version.id,
+        embed_snippet=snippet,
+    )
+
+
 MAX_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
@@ -300,10 +336,16 @@ def get_campaign_analytics(
         )
 
     total_impressions = sum(row["impressions"] for row in version_rows)
+    recommendation = compare_variants(
+        version_rows,
+        campaign_id=str(campaign.id),
+        default_version_id=str(campaign.default_version_id) if campaign.default_version_id else None,
+    ) if version_rows else None
     return {
         "campaign_id": campaign.id,
         "campaign_name": campaign.name,
         "status": campaign.status,
+        "ab_test_enabled": campaign.ab_test_enabled,
         "impressions": total_impressions,
         "submissions": subscriber_count,
         "conversion_rate": (
@@ -312,6 +354,7 @@ def get_campaign_analytics(
             else 0.0
         ),
         "versions": version_rows,
+        "recommendation": recommendation,
     }
 
 

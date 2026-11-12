@@ -7,7 +7,8 @@ from starlette.requests import Request
 
 from app.database import get_db
 from app.main import app
-from app.models import Event, PopupVersion, Subscriber
+from app.models import Campaign, Event, PopupVersion, Subscriber
+from app.services.public_api import assign_popup_version
 from app.services.public_api import enforce_rate_limit
 
 
@@ -16,15 +17,29 @@ class FakeDatabase:
         self.version = None
         self.website_url = "https://store.example/"
         self.subscriber = None
+        self.campaign = None
+        self.versions = []
         self.added = []
 
     def scalar(self, query):
-        statement = str(query)
+        statement = str(query).lower()
         if "websites.url" in statement:
             return self.website_url
         if "subscribers." in statement:
             return self.subscriber
+        if "from campaigns" in statement:
+            return self.campaign
         return self.version
+
+    def scalars(self, _query):
+        class Rows:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def all(self):
+                return self.rows
+
+        return Rows(self.versions)
 
     def add(self, item):
         self.added.append(item)
@@ -176,6 +191,37 @@ class PublicWidgetAPITests(unittest.TestCase):
             content=b"{}",
         )
         self.assertEqual(response.status_code, 413)
+
+    def test_assignment_is_stable_for_same_campaign_and_visitor(self) -> None:
+        versions = [uuid.uuid4() for _ in range(3)]
+        first = assign_popup_version("campaign-stable", "visitor-stable-12345", versions)
+        second = assign_popup_version("campaign-stable", "visitor-stable-12345", list(reversed(versions)))
+        self.assertEqual(first, second)
+
+    def test_disabled_ab_testing_serves_default_for_every_visitor(self) -> None:
+        campaign_id = uuid.uuid4()
+        selected = PopupVersion(
+            id=uuid.uuid4(), campaign_id=campaign_id,
+            config_json={"headline": "Selected default"}, label="B", created_by="user",
+        )
+        other = PopupVersion(
+            id=uuid.uuid4(), campaign_id=campaign_id,
+            config_json={"headline": "Other version"}, label="A", created_by="ai",
+        )
+        self.db.campaign = Campaign(
+            id=campaign_id, website_id=uuid.uuid4(), name="Test", status="published",
+            default_version_id=selected.id, ab_test_enabled=False,
+        )
+        self.db.versions = [other, selected]
+        self.db.version = selected
+
+        for visitor_id in ("visitor-first-12345", "visitor-second-12345"):
+            response = self.client.get(
+                f"/api/public/campaigns/{campaign_id}/config/{visitor_id}",
+                headers={"Origin": "https://store.example"},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["version_id"], str(selected.id))
 
     def test_subscribe_stores_canonical_consent_and_submit_event(self) -> None:
         campaign_id = uuid.uuid4()

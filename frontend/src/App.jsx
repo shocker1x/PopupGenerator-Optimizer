@@ -34,6 +34,7 @@ import {
   exportCampaignSubscribers,
   getCampaignAnalytics,
   getCampaignSubscribers,
+  makePopupVersionDefault,
   generatePopups,
   getToken,
   publishCampaign,
@@ -473,6 +474,18 @@ function Studio({ result, campaign, generated, hostname, token, onBack, onNewSit
     }
   }
 
+  async function setDefaultVersion(versionId) {
+    setAnalyticsBusy(true);
+    setAnalyticsError('');
+    try {
+      await makePopupVersionDefault(campaign.id, versionId, token);
+      await refreshAnalytics();
+    } catch (requestError) {
+      setAnalyticsError(requestError.message);
+      setAnalyticsBusy(false);
+    }
+  }
+
   return (
     <div className="studio-view">
       <div className="studio-toolbar">
@@ -532,9 +545,18 @@ function Studio({ result, campaign, generated, hostname, token, onBack, onNewSit
                     <div className="metric-cell"><span>Conversion</span><strong>{analytics.conversion_rate}%</strong></div>
                     <div className="metric-cell"><span>Dismissals</span><strong>{analytics.versions.reduce((sum, item) => sum + item.dismissals, 0)}</strong></div>
                   </div>
+                  {analytics.recommendation && (
+                    <div className={`recommendation-strip recommendation-strip--${analytics.recommendation.decision}`}>
+                      <div><span className="eyebrow">BAYESIAN RECOMMENDATION</span><strong>{analytics.recommendation.message}</strong><small>{analytics.ab_test_enabled ? 'Variant rotation is active; assignment stays consistent per visitor.' : 'Rotation is paused; the selected default is served to every visitor.'}</small></div>
+                      {analytics.recommendation.expected_lift_percent !== null && <span className="lift-value">{analytics.recommendation.expected_lift_percent > 0 ? '+' : ''}{analytics.recommendation.expected_lift_percent}%<small>expected lift vs. default</small></span>}
+                    </div>
+                  )}
                   <div className="analytics-table-wrap">
-                    <table className="analytics-table"><thead><tr><th>Variant</th><th>Impressions</th><th>Signups</th><th>Conversion</th><th>Dismissals</th></tr></thead><tbody>
-                      {analytics.versions.map((row) => <tr key={row.version_id}><td><span className={`variant-letter variant-letter--${row.label.toLowerCase()}`}>{row.label}</span></td><td>{row.impressions}</td><td>{row.submissions}</td><td>{row.conversion_rate}%</td><td>{row.dismissals}</td></tr>)}
+                    <table className="analytics-table"><thead><tr><th>Variant</th><th>Impressions</th><th>Signups</th><th>Conversion</th><th>90% credible interval</th><th>Chance best</th><th>Dismissals</th><th /></tr></thead><tbody>
+                      {analytics.versions.map((row) => {
+                        const bayes = analytics.recommendation?.versions.find((item) => item.version_id === row.version_id);
+                        return <tr key={row.version_id}><td><span className={`variant-letter variant-letter--${row.label.toLowerCase()}`}>{row.label}</span></td><td>{row.impressions}</td><td>{row.submissions}</td><td>{row.conversion_rate}%</td><td>{bayes ? `${bayes.credible_interval_90[0]}–${bayes.credible_interval_90[1]}%` : '—'}</td><td>{bayes ? `${(bayes.probability_best * 100).toFixed(1)}%` : '—'}</td><td>{row.dismissals}</td><td>{analytics.ab_test_enabled && <button className="make-default-button" type="button" onClick={() => setDefaultVersion(row.version_id)}>Make default</button>}</td></tr>;
+                      })}
                     </tbody></table>
                   </div>
                   <div className="subscriber-heading"><div><strong>Subscribers</strong><span>{subscribers.length}{subscribers.length === 500 ? '+' : ''} shown</span></div></div>

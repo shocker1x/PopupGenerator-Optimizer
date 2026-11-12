@@ -1,3 +1,4 @@
+import hashlib
 import threading
 import time
 from collections import defaultdict
@@ -30,6 +31,15 @@ def get_campaign_origin(db: Session, campaign_id) -> str:
     default_port = 443 if scheme == "https" else 80
     port_suffix = f":{port}" if port and port != default_port else ""
     return f"{scheme}://{hostname}{port_suffix}"
+
+
+def assign_popup_version(campaign_id, visitor_id: str, version_ids: list) -> object:
+    if not version_ids:
+        raise ValueError("At least one popup version is required")
+    stable_ids = sorted(version_ids, key=str)
+    key = f"{campaign_id}:{visitor_id}".encode("utf-8")
+    bucket = int.from_bytes(hashlib.sha256(key).digest()[:8], "big") % len(stable_ids)
+    return stable_ids[bucket]
 
 
 def validate_campaign_origin(

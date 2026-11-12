@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Campaign, Event, PopupVersion, Subscriber, Website
 from app.services.public_api import (
+    assign_popup_version,
     enforce_rate_limit,
     get_campaign_origin,
     preflight_response,
@@ -26,6 +27,10 @@ class PublishedPopupConfig(BaseModel):
     config: dict
 
     model_config = ConfigDict(extra="forbid")
+
+
+class AssignedPopupConfig(PublishedPopupConfig):
+    visitor_id: str
 
 
 class PublicEventType(StrEnum):
@@ -100,6 +105,48 @@ def get_published_popup_config(
         campaign_id=campaign_id,
         version_id=version.id,
         config=version.config_json,
+    )
+
+
+@router.get("/campaigns/{campaign_id}/config/{visitor_id}", response_model=AssignedPopupConfig)
+def get_assigned_popup_config(
+    campaign_id: uuid.UUID,
+    visitor_id: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AssignedPopupConfig:
+    if len(visitor_id) < 16 or len(visitor_id) > 100:
+        raise HTTPException(status_code=422, detail="Invalid visitor ID")
+    validate_campaign_origin(db, campaign_id, request, response)
+    enforce_rate_limit(request, campaign_id, "config", limit=120, window_seconds=60)
+    campaign = db.scalar(
+        select(Campaign).where(Campaign.id == campaign_id, Campaign.status == "published")
+    )
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Published popup not found")
+    if not campaign.ab_test_enabled and campaign.default_version_id:
+        version = db.scalar(
+            select(PopupVersion).where(
+                PopupVersion.id == campaign.default_version_id,
+                PopupVersion.campaign_id == campaign.id,
+            )
+        )
+    else:
+        versions = db.scalars(
+            select(PopupVersion).where(PopupVersion.campaign_id == campaign_id)
+        ).all()
+        if not versions:
+            raise HTTPException(status_code=404, detail="Published popup not found")
+        selected_id = assign_popup_version(campaign_id, visitor_id, [version.id for version in versions])
+        version = next(item for item in versions if item.id == selected_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Published popup not found")
+    return AssignedPopupConfig(
+        campaign_id=campaign_id,
+        version_id=version.id,
+        config=version.config_json,
+        visitor_id=visitor_id,
     )
 
 
